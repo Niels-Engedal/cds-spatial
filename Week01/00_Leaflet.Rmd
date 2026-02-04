@@ -86,7 +86,7 @@ leaflet() %>%
   addTiles() %>%
   addProviderTiles("Esri.WorldImagery", 
                    options = providerTileOptions(opacity=0.5)) %>% 
-  setView(lng = 151.005006, lat = -33.971, zoom = 10)
+  setView(lng = 10, lat = 56, zoom = 10)
 
 ```
 
@@ -97,7 +97,7 @@ You can add multiple different layers of background tiles and make them partiall
 leaflet() %>% 
   addTiles() %>% 
   setView( lng = 2.34, lat = 48.85, zoom = 5 ) %>% 
-  addProviderTiles("Esri.WorldPhysical", group = "Physical") %>% 
+  addProviderTiles("Esri.WorldPhysical", group = "Physical", options = providerTileOptions(opacity=0.25)) %>% 
   addProviderTiles("Esri.WorldImagery", group = "Aerial") %>% 
   addProviderTiles("MtbMap", group = "Geo") %>% 
 
@@ -170,8 +170,51 @@ Now that we have learned the basics of using the Map Widget, let learn how to ad
 First, create a Danish equivalent of `AUSmap` with ESRI layers and call it `DKmap`
 ```{r dkmap}
 ## YOUR CODE HERE
-```
+leaflet() %>%
+  addTiles() %>%
+  addProviderTiles("Esri.WorldImagery", 
+                   options = providerTileOptions(opacity=0.5)) %>% 
+  setView(lng = 9, lat = 56, zoom = 6)
 
+l_dk <- leaflet() %>% setView(lng = 9, lat = 56, zoom = 6)
+
+
+# Let's get all the maps provider layers from Esri:
+esri <- grep("^Esri", providers, value = TRUE)
+
+# make sure you run the next three lines together else the for-loop will not work
+for (provider in esri) {
+  l_dk <- l_dk %>% addProviderTiles(provider, group = provider)
+}
+
+# Create the full object
+DKmap <- l_dk %>% 
+  addLayersControl(baseGroups = names(esri),
+                   options = layersControlOptions(collapsed = TRUE)) %>% 
+  addMiniMap(tiles = esri[[1]], toggleDisplay = TRUE,
+             position = "bottomright") %>% 
+  addMeasure(
+    position = "bottomleft",
+    primaryLengthUnit = "meters",
+    primaryAreaUnit = "sqmeters",
+    activeColor = "#3D535D",
+    completedColor = "#7D4479") %>% 
+  htmlwidgets::onRender("
+                        function(el, x) {
+                        var myMap = this;
+                        myMap.on('baselayerchange',
+                        function (e) {
+                        myMap.minimap.changeLayer(L.tileLayer.provider(e.name));
+                        })
+                        }") %>% 
+addControl("", position = "topright")
+  
+DKmap # display the map document
+```
+```{r save-DKmap}
+library(htmlwidgets)
+saveWidget(DKmap, "DKmap.html", selfcontained = TRUE)
+```
 
 ## Create spatial data
 
@@ -192,8 +235,8 @@ Read in the data from googlesheet with `read_sheet()` function, specifying the p
 ```{r read-sheet}
 gs4_deauth() # if the authentication is not working for you
 
-places <- read_sheet("https://docs.google.com/spreadsheets/d/1PlxsPElZML8LZKyXbqdAYeQCDIvDps2McZx1cTVWSzI/edit#gid=1817942479",
-                     range = "SA2022",
+places <- read_sheet("https://docs.google.com/spreadsheets/d/1PlxsPElZML8LZKyXbqdAYeQCDIvDps2McZx1cTVWSzI/edit?gid=992055308#gid=992055308",
+                     range = "SA2026",
                      col_types = "cccnncnc")
 glimpse(places)
 ```
@@ -221,10 +264,24 @@ Try doing this in three steps
 You can find the tips for this on the [Leaflet R website](https://rstudio.github.io/leaflet/markers.html). Look for the Popups in the the left menu and Marker Clusters under markers.
 ```{r dkmap-data}
 # YOUR CODE
+places <- places %>%
+  mutate(PopupLabel = paste0("<b>", Placename, "</b><br>", Description))
 
+DKmap <- DKmap %>% addMarkers(lng = places$Longitude, 
+             lat = places$Latitude,
+             popup = places$PopupLabel,
+             clusterOptions = markerClusterOptions()
+             )
+
+DKmap
 ```
 
 Save your map and rejoice!
+```{r - save-DKmap-with-labels}
+library(htmlwidgets)
+saveWidget(DKmap, "DKmap_with_places.html", selfcontained = TRUE)
+```
+
 
 ## References
 

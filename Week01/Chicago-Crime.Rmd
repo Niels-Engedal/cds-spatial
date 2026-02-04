@@ -1,0 +1,275 @@
+---
+title: "Chicago Crime"
+author: "Niels"
+date: "2026-02-04"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r, loading-libraries}
+library(leaflet)
+library(leaflet.extras) # for heatmap
+library(tidyverse)
+library(htmlwidgets)
+library(htmltools) # for primary type cluster markers
+```
+
+```{r, loading-data}
+# sample data/ChicagoCrimes2017.csv
+ccdata <- read_csv("data/ChicagoCrimes2017.csv")
+glimpse(ccdata)
+```
+```{r, mapping crimes}
+ccdata$`Primary Type` <- as.factor(ccdata$`Primary Type`)
+
+pal <- colorFactor(palette = "Set1", domain = ccdata$`Primary Type`)
+
+CCmap <- leaflet(ccdata) %>%
+  addProviderTiles("Esri.WorldTopoMap", group = "Topo") %>%
+  addProviderTiles("Esri.WorldImagery", group = "ESRI Aerial") %>%
+  addCircleMarkers(
+    lng = ~Longitude, lat = ~Latitude,
+    radius = 3, opacity = 0.7,
+    color = ~pal(`Primary Type`),
+    stroke = TRUE, fillOpacity = 0.6, weight = 1,
+    popup = ~paste0(
+      "ID: ", ID,
+      "<br> Primary Type: ", `Primary Type`,
+      "<br> Description: ", Description,
+      "<br> Date: ", Date
+    ),
+    group = "Crimes",
+    clusterOptions = markerClusterOptions()
+  ) %>%
+  addLegend("bottomright", pal = pal, values = ~`Primary Type`, title = "Primary Type") %>%
+  addLayersControl(
+    baseGroups = c("Topo", "ESRI Aerial"),
+    overlayGroups = c("Crimes"),
+    options = layersControlOptions(collapsed = TRUE)
+  )
+
+CCmap
+
+```
+```{r, consolidating-primary-types}
+library(dplyr)
+library(leaflet)
+
+# 1) Keep only rows with usable coordinates
+ccdata <- ccdata %>%
+  filter(!is.na(Longitude), !is.na(Latitude))
+
+# 2) Primary Type stays as the detailed label for each point
+ccdata$`Primary Type` <- as.factor(ccdata$`Primary Type`)
+
+# 3) Create an OVERALL category used for clusters + legend
+ccdata <- ccdata %>%
+  mutate(
+    primary = as.character(`Primary Type`),
+    type_group = case_when(
+      primary %in% c("HOMICIDE","KIDNAPPING","CRIM SEXUAL ASSAULT","SEX OFFENSE",
+                     "OFFENSE INVOLVING CHILDREN","HUMAN TRAFFICKING","STALKING") ~ "Violent / Sexual",
+      primary %in% c("ASSAULT","BATTERY","INTIMIDATION") ~ "Assault / Battery",
+      primary %in% c("ROBBERY","BURGLARY","THEFT","MOTOR VEHICLE THEFT",
+                     "CRIMINAL TRESPASS","CRIMINAL DAMAGE","ARSON") ~ "Property",
+      primary %in% c("NARCOTICS","OTHER NARCOTIC VIOLATION","LIQUOR LAW VIOLATION",
+                     "GAMBLING","PROSTITUTION","OBSCENITY","PUBLIC INDECENCY") ~ "Vice / Drugs",
+      primary %in% c("WEAPONS VIOLATION","CONCEALED CARRY LICENSE VIOLATION") ~ "Weapons",
+      primary %in% c("INTERFERENCE WITH PUBLIC OFFICER","PUBLIC PEACE VIOLATION") ~ "Public Order",
+      primary %in% c("DECEPTIVE PRACTICE") ~ "Fraud / Deception",
+      primary %in% c("NON-CRIMINAL","NON-CRIMINAL (SUBJECT SPECIFIED)") ~ "Non-criminal",
+      TRUE ~ "Other"
+    ),
+    type_group = factor(type_group)
+  )
+
+# 4) Two palettes:
+#    - points: Primary Type (detailed)
+#    - clusters + legend: type_group (few categories)
+pal_primary <- colorFactor("Set1", domain = ccdata$`Primary Type`)
+pal_group   <- colorFactor("Dark2", domain = ccdata$type_group)
+```
+
+```{r, clustered-map-with-group-legend}
+library(leaflet)
+library(htmlwidgets)
+library(htmltools)
+library(jsonlite)
+library(tibble)
+library(dplyr)
+
+# --- A) Build a JS lookup: Primary Type -> type_group ---
+lookup <- ccdata %>%
+  distinct(primary = as.character(`Primary Type`), type_group = as.character(type_group))
+
+type_lookup <- tibble::deframe(lookup)  # named vector: names=primary, values=type_group
+type_lookup_json <- jsonlite::toJSON(type_lookup, auto_unbox = TRUE)
+
+# --- B) Cluster icon JS: find dominant GROUP within cluster ---
+cluster_js <- JS("
+function (cluster) {
+  var children = cluster.getAllChildMarkers();
+
+  var counts = {};
+  for (var i = 0; i < children.length; i++) {
+    // group color is stored as fillColor on each marker
+    var col = children[i].options.fillColor || '#666';
+    counts[col] = (counts[col] || 0) + 1;
+  }
+
+  var topColor = '#666', topN = -1;
+  for (var k in counts) {
+    if (counts[k] > topN) { topN = counts[k]; topColor = k; }
+  }
+
+  var n = cluster.getChildCount();
+
+  return new L.DivIcon({
+    html: '<div class=\"cluster-pred\" style=\"background:' + topColor + '\"><span>' + n + '</span></div>',
+    className: 'cluster-pred-wrap',
+    iconSize: new L.Point(40, 40)
+  });
+}
+")
+
+
+# --- C) Generate CSS that colors cluster backgrounds by GROUP palette ---
+group_levels <- levels(ccdata$type_group)
+group_cols   <- pal_group(group_levels)
+
+slug <- function(x) gsub("[^a-zA-Z0-9]", "-", tolower(x))
+
+cluster_color_rules <- paste0(
+  sprintf(".cluster-%s { background: %s; }", slug(group_levels), group_cols),
+  collapse = "\n"
+)
+
+css_all <- paste0("
+/* cluster icon base */
+.cluster-pred-wrap { background: transparent; border: none; }
+.cluster-pred {
+  width: 40px; height: 40px;
+  border-radius: 999px;
+  border: 2px solid rgba(255,255,255,0.85);
+  box-shadow: 0 1px 6px rgba(0,0,0,0.35);
+  display: flex; align-items: center; justify-content: center;
+}
+.cluster-pred span {
+  color: white;
+  font-weight: 700;
+  font-size: 13px;
+  line-height: 1;
+  text-shadow: 0 1px 2px rgba(0,0,0,0.4);
+}
+
+/* cluster colors by dominant group */
+", cluster_color_rules, "
+
+/* tiny, readable legend */
+.leaflet-control.crime-legend {
+  background: rgba(255,255,255,0.92) !important;
+  padding: 6px 8px !important;
+  border-radius: 6px;
+  box-shadow: 0 1px 6px rgba(0,0,0,0.25);
+  font-size: 10px !important;
+  line-height: 1.2 !important;
+  max-height: 160px;
+  overflow-y: auto;
+}
+.leaflet-control.crime-legend i {
+  width: 10px !important;
+  height: 10px !important;
+  margin-right: 6px;
+  opacity: 1 !important;
+  border-radius: 2px;
+  display: inline-block !important;
+}
+.leaflet-control.crime-legend span {
+  font-size: 10px !important;
+  color: #111 !important;
+  white-space: nowrap;
+}
+")
+
+# --- D) Build the map ---
+CCmap_GroupCluster <- leaflet(ccdata) %>%
+  addProviderTiles("Esri.WorldTopoMap", group = "Topo") %>%
+  addProviderTiles("Esri.WorldImagery", group = "ESRI Aerial") %>%
+  htmlwidgets::prependContent(htmltools::tags$style(htmltools::HTML(css_all))) %>%
+
+  addCircleMarkers(
+    lng = ~Longitude, lat = ~Latitude,
+    radius = 4,
+
+    # detailed category (primary type) stays visible as the outline
+    color = ~pal_primary(`Primary Type`),
+
+    # overall category (group) drives the cluster “vote”
+    fillColor = ~pal_group(type_group),
+
+    opacity = 1,
+    fillOpacity = 1,
+    weight = 1,
+
+    popup = ~paste0(
+      "ID: ", ID,
+      "<br> Group: ", type_group,
+      "<br> Primary Type: ", `Primary Type`,
+      "<br> Description: ", Description,
+      "<br> Date: ", Date
+    ),
+    group = "Crimes",
+    clusterOptions = markerClusterOptions(
+    iconCreateFunction = cluster_js,          # ← visual
+    spiderfyDistanceMultiplier = 1.4,          # ← distance
+    spiderLegPolylineOptions = list(           # ← leg styling
+      weight = 1,
+      opacity = 0.25
+    ),
+    showCoverageOnHover = FALSE,
+    zoomToBoundsOnClick = TRUE
+  )
+  ) %>%
+
+  addLegend(
+    position = "topright",
+    pal = pal_group,
+    values = ~type_group,
+    title = NULL,
+    opacity = 1,
+    className = "crime-legend"
+  )
+
+
+CCmap_GroupCluster
+```
+```{r, save-primary-map}
+# Save the map as an HTML file
+saveWidget(CCmap_GroupCluster, "ChicagoCrime_Map.html", selfcontained = TRUE)
+```
+
+
+
+```{r, crime heatmap}
+heatmap <- leaflet(ccdata) %>%
+  addProviderTiles("Esri.WorldTopoMap", group = "Topo") %>%
+  addProviderTiles("Esri.WorldImagery", group = "ESRI Aerial") %>%
+  addHeatmap(
+    lng = ~Longitude, lat = ~Latitude,
+    intensity = 1,
+    blur = 5,
+    radius = 5,
+    group = "Heatmap"
+  ) %>%
+  addLayersControl(
+    baseGroups = c("Topo", "ESRI Aerial"),
+    overlayGroups = c("Heatmap"),
+    options = layersControlOptions(collapsed = TRUE)
+  )
+
+heatmap
+```
+
