@@ -45,14 +45,34 @@ In this exercise you will read in three shapefiles (parks, playgrounds, and fore
 * Use the `head()` function and identify the first few features of each layer.
 
 ```{r load, eval=FALSE, echo=TRUE}
-
+library(sf)
+# Load the forests shapefile
+forests <- st_read("../data/forests.shp")
+playgrounds <- st_read("../data/playgrounds4326.shp")
+parks <- st_read("../data/parks.shp")
+shelters <- st_read("../data/shelters.json")
 ```
 
 ## Questions: 
 
 1. How many features does each layer contain and what kind of geometry are they?
-2. What is the CRS value in these objects?
+*Answer:*
+Forests has 32 features and they are MULTIPOLYGONS.
+Playgrounds has 51 features and they are POINTS.
+Parks has 47 features and they are MULTIPOLYGONS.
+Shelters has 19 features and they are POINTS.
 
+```{r, Q1}
+forests
+playgrounds
+parks
+shelters
+```
+
+
+
+2. What is the CRS value in these objects?
+ETRS89 / UTM zone 32N, it is "NA" for Playgrounds
 
 Well done, now you should see how easy it can be to read in shapefiles and you got your first taste of what an sf object looks like.
 
@@ -73,16 +93,15 @@ Spatial objects in `sf` are just data frames with some special properties. This 
 
 ```{r wrangle-parks, eval=FALSE, echo=TRUE}
 # Load the sf package
-___
-
+#Has been done previously
+library(dplyr)
 # ... and the dplyr package
-___
 
 # Use filter() to limit to over5ha parks
-___
+parks_over5ha <- parks %>% filter(areal_m2 > 50000)
 
 # Count the number of rows
-___
+parks_over5ha %>% nrow()
 
 # Limit to navn and areal_m2 variables
 
