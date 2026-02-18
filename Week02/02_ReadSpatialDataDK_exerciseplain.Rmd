@@ -26,7 +26,6 @@ There are a few key spatial packages available for Spatial Analysis in R, which 
 
 * `sf` for working with vector data
 * `raster` \ `terra` for working with raster data
-* `rgdal` for an R-friendly GDAL interface
 
 The installation of the geospatial libraries GDAL, GEOS and PROJ.4 varies significantly based on operating system (and can be entailed). All of these are dependencies for `sf`, the R package that we will be using for spatial data operations throughout this course. Please follow the Option A: Local installation instructions for your operating system on [this page](https://datacarpentry.org/geospatial-workshop/setup.html) under the heading GDAL, GEOS, and PROJ.4 and continue through the R Packages. Click on the linked pages to make your life easier.
 
