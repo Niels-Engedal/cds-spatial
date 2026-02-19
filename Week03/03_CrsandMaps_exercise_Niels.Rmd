@@ -1,0 +1,618 @@
+---
+title: "Coordinate systems and maps"
+author: "Adela Sobotkova"
+date: "04-February-2024 updated `r Sys.Date()`"
+output:
+  rmdformats::readthedown:
+    highlight: kate
+---
+
+```{r setup, include=FALSE}
+library(knitr)
+library(rmdformats)
+
+## Global options
+options(max.print="75")
+opts_chunk$set(echo=TRUE,
+	             cache=TRUE,
+               prompt=FALSE,
+               tidy=TRUE,
+               comment=NA,
+               message=FALSE,
+               warning=FALSE)
+opts_knit$set(width=75)
+```
+
+#  Goals: 
+
+1. In the first exercise, you use the Grammar of Graphics to fix a map with `tmap()` by modifying the provided code. The libraries, data, and initial code is provided below.
+
+2. In the second exercise, you inspect and assess the compatibility of the provided spatial datasets
+
+3. In the third exercise, you
+
+ - extrapolate a missing CRS, and
+ - define the missing projection in R 
+
+4. In the fourth (and optional) exercise, practice how to
+
+ - reconcile CRS of your spatial data
+ - reproject raster and vectors to a shared SRS
+
+5. In the fifth exercise, improve your a map of Aarhus from Week 2 following the best map design principles.
+
+ - plot layers together
+ - limit your data into an area of interest
+ 
+6. Create a mirror pair of honest and lying maps of Danish 2025 kommunal election results
+
+#### Required R libraries
+
+We will use the `sf`, `raster`/`terra`, and `tmap` packages and then a few oldies.
+
+```{r libraries}
+library(sf)
+library(raster)
+library(tmap)
+library(googlesheets4)
+library(tidyverse)
+```
+
+
+# Exercise 1 - Fix a map of Denmark
+
+In this exercise you will learn to make a map with `tmap` library, by adding spatial data layers and modifying the arguments that specify their rendering.
+
+#### Data sets  
+
+We will use two data sets: `elevation` and `counties`. Both originate from the UC Davis global databaset and you can redownload them with `getData()`. (see Week02, Exercise 12) 
+The first one is an elevation raster object for Denmark, and the second one is a spatial dataframe object with polygons representing the 99 Danish municipalities.
+
+#### Existing code
+
+Here is the code to create a new map of Denmark. Your role is to improve this map based on the suggestions below.
+
+```{r initial-map}
+# get elevation
+elevation <- raster("../data/DNK_msk_alt.grd")
+
+# get counties
+counties <- readRDS("../data/gadm36_DNK_2_sp.rds")
+
+
+# starting a static map in tmap v3
+tm_shape(elevation)  +
+  tm_raster(title = "elev", 
+            style = "cont",
+            palette = "BuGn") +
+  tm_shape(counties) +
+  tm_borders(col = "red", 
+             lwd = 3) +
+  tm_scale_bar(breaks = c(0, 100, 200),
+               text.size = 1) +
+  tm_compass(position = c("LEFT", "center"),
+             type = "rose", 
+             size = 2) +
+  tm_credits(text = "A. Sobotkova, 2024") +
+  tm_layout(main.title = "My terrible map",
+            bg.color = "orange",
+            inner.margins = c(0, 0, 0, 0))
+```
+
+```{r}
+# starting a static map in tmap v4
+tm_shape(elevation)  +
+  tm_raster(col.legend = tm_legend(title ="elev"), 
+            col.scale = tm_scale_continuous(values = "brewer.bu_gn",
+                                            midpoint = 0)) +
+  tm_shape(counties) +
+  tm_borders(col = "red", 
+             lwd = 3) +
+  tm_scalebar(breaks = c(0, 100, 200),
+               text.size = 1) +
+  tm_compass(position = c("LEFT", "center"),
+             type = "rose", 
+             size = 2) +
+  tm_credits(text = "A. Sobotkova, 2025") +
+  tm_title("My terrible map")+
+  tm_layout(bg.color = "orange",
+            inner.margins = c(0, 0, 0, 0))
+
+# install.packages(c("shinyjs", "colorblindcheck"))
+# cols4all::c4a_gui()
+```
+
+
+
+## Tasks 
+
+1. Change the map title from "My terrible map" to "Denmark's municipalities".*Done*
+2. Update the map credits with your own name and today's date. *Done*
+3. Change the color palette to yellow to brown sequence ("-RdYlGn" in v3 and equivalent in v4). *Done*
+  (You can also try other palettes from http://colorbrewer2.org/ or cols4all::c4a_gui())
+4. Put the north arrow in the top right corner of the map or some better position.*Done*
+5. Improve the legend title by adding the used units (masl). *Done*
+6. Increase the number of breaks in the scale bar and move it to top right. *Done, but not happy with how the compass and scalebar look together*
+7. Change the borders' color of the municipalities to black. Decrease the line width.*Done*
+8. Change the background color to some reasonable color of your choice.*Done*
+
+
+## Your solution
+
+```{r improved-map}
+# /Start Code/
+tm_shape(elevation)  +
+  tm_raster(col.legend = tm_legend(title ="Elevation (masl)"), 
+            col.scale = tm_scale_continuous(values = "brewer.PuRd", #PuBuGn is als nice
+                                            midpoint = 0)) +
+  tm_shape(counties) +
+  tm_borders(col = "black", 
+             lwd = 1) +
+tm_scalebar(
+  breaks = c(0, 50, 100, 150, 200),
+  text.size = 1,
+  position = c(0.40, 0.99)
+) +
+tm_compass(
+  type = "4star",
+  size = 1,
+  position = c(0.92, 0.9995)
+) +
+  tm_credits(text = "N. Engedal, 18th of February 2026") +
+  tm_title("Denmark's Municipalities") +
+  tm_layout(bg.color = "lightblue",
+            inner.margins = c(0, 0, 0, 0))
+# /End Code/
+```
+
+
+# Exercise 2 - Create and inspect spatial data
+
+We will use three data sets: `elevation`, `places` and `nitrates`, explore them, and make a map.
+The first one is an elevation raster object for Denmark you already used above. The second dataset is a list of places you created in week 1. The third is a geochemical dataset from landbrug.dk.
+
+You have already read in the raster, and so now the focus is on the vector data. You need to create these from googlesheet/csv before you can inspect them. Follow the instructions and answer the questions related.
+
+#### Preparation: Create vector data from a csv with LatLong and WKT
+Load the two datasets:
+
+- read in the places googlesheet using the `read_sheet()` function (grab it from W01 exercise)
+- use `read_csv()` to grab nitrates.csv file and use `slice()` function to grab the first 5000 records upon reading it in to reduce its size.
+
+```{r load-data, eval = FALSE}
+# Load your DK places googlesheet from W01
+gs4_deauth() # if the Gdrive authentication is not working for you
+
+places <- read_sheet("https://docs.google.com/spreadsheets/d/1PlxsPElZML8LZKyXbqdAYeQCDIvDps2McZx1cTVWSzI/edit#gid=1817942479", range = "SA2026", col_types = "cccnncnc")
+
+
+# Load the first 5000 rows in .csv-file and save it as "nitrates":
+nitrates <- read_csv("../data/nitrate.csv") %>% 
+  slice(1:5000)
+```
+
+
+#### Convert the tabular data into simple feature using their geometry columns
+
+Tabular data contain spatial data, that you can use to convert these tibbles into simple features! Note the `lat/long` columns in `places` and `wkt` column in `nitrates`. Inspect these columns and convert the objects to simple feature using the `st_as_sf()` function using the `coords` and the `wkt` arguments respectively!
+
+- take `places`, filter missing coordinates away and then use the `st_as_sf()` function with the `coords` argument to cast into a simple feature `places_sf`
+- for `nitrates`, use the `st_as_sf()` function with the `wkt` argument to convert to simple feature `nitrates_sf`.
+- use `plot(places_sf$geometry)` and `plot(nitrates_sf$WKT)` to view each simple feature in space. 
+
+```{r st-as-sf, eval = FALSE}
+
+places_sf <- places %>% 
+  filter(!is.na(Latitude)) %>% 
+  st_as_sf(coords = c("Longitude", "Latitude"))
+
+nitrates_sf <- nitrates %>% st_as_sf (wkt = "WKT")
+
+```
+
+```{r}
+plot(places_sf$geometry)
+```
+```{r}
+plot(nitrates_sf$WKT)
+```
+
+## Instructions and questions
+
+Type answers to the questions as code comments next to or under the code used
+
+* Display the `nitrates_sf` and `places_sf` objects and view their structure.
+What can you say about the content of each file?
+
+  - What type of data does it store? 
+  - How many attributes does it contain?
+  - What is its geometry? (points, lines, polygons, surfaces, network)
+  - What kind of coordinate system does it use?
+
+* Display the `elevation` object and view its structure.
+What can you say about the content of this file? 
+
+  - What type of data does it store?
+  - What is the coordinate system used? 
+  - How many attributes does it contain?
+  - How many dimensions does it have? 
+  - What is the data resolution?
+  
+* Can you plot the files on top of one another? Why?
+
+
+## Your solution and answers
+
+```{r inspect-data}
+# /Start Code / #
+places_sf # does not have a CRS, is in LongLat (POINT) format Contains 33 features (attributes) and has 6 dimensions
+nitrates_sf # does not have CRS, is POINT but in Easting/Northing format, contains 5000 features and 18 dimensions
+# /End Code/ #
+```
+
+# Exercise 3 - Define coordinate systems
+A machine-readable CRS is prerequisite to spatial visualisation and analysis, but not all spatial datasets that float around have its CRS defined.  Here you learn to define/specify the coordinate systems for datasets where the CRS is NA/missing/unrecognized by R. You can fix this situation if *YOU* know what the CRS should be. 
+
+Look at the coordinates in `places` and `nitrates`again. While both refer to places in Denmark, their formats are different, signalling different CRS. Can you guess what they are?
+ 
+ - `places` contain lat/long columns which you have created on the basis of GoogleMaps which uses `Web Mercator`, or WGS84 CRS. This translates into EPSG 4326.
+-   `nitrates` contain WKT column with planar coordinates provided by landbrug.dk server. The source server specifies that all data is ETRS89 UTM32N,  which corresponds to EPSG 25832.
+
+## Instructions:
+
+*  define CRS for each spatial object with `st_set_crs()` using the CRS they are compatible with.
+*  write the CRS into the name of these defined object in R and write the CRS into the name!
+
+## Your solution and answers
+
+```{r define-crs, eval = FALSE}
+# /Start Code / #
+
+places4326 <- places_sf %>% st_set_crs(4326)
+
+nitrates25832 <- nitrates_sf %>% st_set_crs(25832)
+
+places4326
+nitrates25832
+# /End Code/ #
+```
+Wonderful, your vector data now have defined spatial metadata. In the next step, reconcile these two CRSs so you can display them in the same map.
+
+
+# Exercise 4 - Reconce coordinate systems
+
+Now that you know that coordinate systems differ, make them compatible. You have two final CRS choices. Convert your objects to one or another CRS so that you can display the nitrate samples and DK places over the elevation map of Denmark. 
+
+Remember that you use `st_transform()` to reproject vector data, and `projectRaster()` on raster data to change their CRS.w
+
+
+## Instructions
+
+* Option 1: Transform the `nitrates` dataset into the coordinate reference system used in the `places` object. 
+
+  - Create a new object `nitrates` with the `places` crs. You can label it `nitrates_####` writing the EPSG out for easy differentiation.
+  - Visualize the results using the `plot()` function.
+
+* Option 2: Reproject the `elevation` and `places` data into the coordinate reference system used in the `nitrates` object.
+  - Create a new object `elevation_####` with the `nitrates` crs.
+  - Visualize the results (`elevation_####`` together with `nitrates`) 
+  
+## Your solution and answers
+I will reproject the *elevation* and *places* data into the 25832 CRS from the nitrate as I expect Landbrug.dk to have made the choice for a well representative CRS of Denmark specifically (and because it gives me more practice).
+```{r reproject-crs}
+# /Start Code / #
+elevation_25832 <- projectRaster(elevation, crs = st_crs(nitrates25832)$proj4string)
+places_25832 <- st_transform(places4326, crs = 25832)
+
+places_25832
+# /End Code/ #
+```
+
+#### Now I will plot them on top of each other
+```{r}
+plot(nitrates25832$WKT)
+plot(elevation_25832, add=TRUE)
+plot(places_25832$geometry, add=TRUE, col="red", pch=16)
+```
+# Exercise 5 - Improve your map of Aarhus from Week 2
+
+Make your Week 2 map publication-ready! Download data about DK available online (if needed). 
+Make a clean and legible map of Aarhus and a focus area (see below) with `tmap` library following the Exercise no.1 above and the guide [here](https://mtennekes.github.io/tmap4/) or [here](https://r.geocompx.org/adv-map)
+
+
+Additional challenge: 
+
+* Draw a bounding box (hint `st_make_grid()` to generate it) or a buffer around the district you live in or some other area of interest, and generate a more detailed map of this area, while leaving Aarhus + Denmark's boundary in an inset for orientation. Make sure to add title and an explanation for your choice. Include a legend for any environmental background data.
+* Choose a reasonable classification if you are visualising environmental or quantitative data of any sort.
+* Figure out how you could print this result as .png ( explore `ggsave`) so the ratio and position of the inset is preserved
+
+
+## Your solution
+```{r your-map}
+# /Start Code/ #
+library(geodata)
+?gadm()
+elevation <- elevation_30s(country = "DNK", mask = TRUE, path = tempdir())
+municipalities <- gadm(country = "DNK", level = 2, path = ".") %>% st_as_sf()
+DK_border <- gadm(country = "DNK", level = 0, path = ".")%>% st_as_sf()
+# /End Code/ #
+```
+```{r}
+# load the new cool data (infrastructure of denmark from https://data-science.dk/kasse/order-received/3221/?key=wc_order_BhDZCqAD29sym)
+getwd()
+
+# roads
+byveje <- st_read("data/Beboelsesveje_DK/infrastruktur_residential.geojson")
+landeveje <- st_read("data/Landeveje_DK/infrastruktur_primary.geojson")
+motorveje <- st_read("data/Motorveje_DK/infrastruktur_motorway.geojson")
+motortrafikveje <- st_read("data/Motortrafikveje_DK/infrastruktur_trunk.geojson")
+busveje <- st_read("data/Busveje_DK/infrastruktur_busway.geojson")
+
+# points
+helikopter <- st_read("data/Helikopterlandingspladser_DK/infrastruktur_helipad.geojson")
+vejkryds <- st_read("data/Vejkryds_DK/infrastruktur_crossing.geojson")
+busstationer <- st_read("data/Bustationer_DK/infrastruktur_bus_station.geojson")
+busstop <- st_read("data/BusStoppesteder_DK/infrastruktur_bus_stop.geojson")
+brandstationer <- st_read("data/Brandstationer_DK/pois_fire_station.geojson")
+
+DK_border <- gadm(country = "DNK", level = 0, path = ".")%>% st_as_sf()
+
+DK_border # is in same WGS 84 as the other two datasets, so we can plot them together
+plot(st_geometry(DK_border), col="black")
+plot(brandstationer, add=TRUE, col="red")
+
+#plot(byveje) # really heavy plot fyi!
+```
+### Building easier to work with sf objects:
+```{r}
+library(dplyr)
+library(sf)
+library(tmap)
+library(stringr)
+
+roads_sf <- bind_rows(
+  motorveje       %>% mutate(type = "Motorway"),
+  motortrafikveje %>% mutate(type = "Trunk / motortrafikvej"),
+  landeveje       %>% mutate(type = "Primary / landevej")
+  #byveje          %>% mutate(type = "Byvej")
+) %>%
+  mutate(type = str_trim(type)) %>%
+  filter(!is.na(type)) %>%
+  mutate(type = factor(type, levels = c(
+    "Motorway", "Trunk / motortrafikvej", "Primary / landevej"#, "Byvej"
+  ))) %>%
+  mutate(type = droplevels(type))
+
+stations_sf <- bind_rows(
+  brandstationer %>% mutate(type = "Fire station"),
+  busstationer   %>% mutate(type = "Bus station"),
+  helikopter %>% mutate(type = "Helikopter")
+  #busstop        %>% mutate(type = "Bus stop")
+) %>%
+  mutate(type = str_trim(type)) %>%
+  filter(!is.na(type)) %>%
+  mutate(type = factor(type, levels = c(
+    "Fire station", "Bus station", "Helikopter"#, "Bus stop"
+  ))) %>%
+  mutate(type = droplevels(type))
+```
+
+### Colors and sizes:
+```{r}
+road_cols <- c(
+  "Motorway" = "orange",
+  "Trunk / motortrafikvej" = "blue",
+  "Primary / landevej" = "cyan2"
+  #"Byvej" = "lightblue"
+)
+
+station_cols <- c(
+  "Fire station" = "red",
+  "Bus station"  = "purple",
+  "Helikopter" = "green"
+  #"Bus stop"     = "magenta2"
+)
+
+# Line widths per road type
+road_lwd <- c(
+  "Motorway" = 2,
+  "Trunk / motortrafikvej" = 1,
+  "Primary / landevej" = 0.75
+  #"Byvej" = 0.4
+)
+
+# Dot sizes per station type (Denmark-scale: bus stops must be tiny!)
+station_size <- c(
+  "Fire station" = 0.30,
+  "Bus station"  = 0.15,
+  "Helikopter" = 0.30
+  #"Bus stop"     = 0.02
+)
+
+# Optional: verify all levels are covered
+#setdiff(levels(stations_sf$type), names(station_cols))
+#setdiff(levels(roads_sf$type), names(road_cols))
+```
+
+### Then trying to do it with *tmap*
+```{r}
+tm_shape(DK_border) +
+  tm_borders(lwd = 2) +
+
+tm_shape(roads_sf) +
+  tm_lines(
+    col = "type",
+    col.scale = tm_scale_categorical(values = road_cols),
+
+    lwd = "type",
+    lwd.scale = tm_scale_categorical(values = road_lwd),
+    lwd.legend = tm_legend_hide(),
+
+    col.legend = tm_legend(title = "Road type")
+  ) +
+
+tm_shape(stations_sf) +
+  tm_dots(
+    fill = "type",  # <-- key change
+    fill.scale = tm_scale_categorical(values = station_cols),
+    fill.legend = tm_legend(title = "Stations"),
+
+    size = "type",
+    size.scale = tm_scale_categorical(values = station_size),
+    size.legend = tm_legend_hide(),
+
+    col = "black",  # optional: outline color
+    lwd = 0.2       # optional: outline width
+  ) +
+
+tm_compass(position = c("RIGHT","bottom"), type = "arrow", size = 1) +
+tm_scalebar(position = c("RIGHT","bottom")) +
+tm_credits(text = "N. Engedal, 18th of February 2026", position=c(1, 0.5)) +
+tm_title("Selected Points of Interest for Critical Infrastructure in Denmark") +
+tm_layout(bg.color = "white", frame = FALSE)
+
+# Save the map in high res in output dir
+tmap_save(
+  filename = "output/denmark_infrastructure.png",
+  width = 3840, height = 2160, units = "px", dpi = 600
+)
+```
+
+# Exercise 6 - Challenge: Make a map that is true and that lies
+
+You are a political consultant. Your client wants a map of [Danish election results (2025)](https://docs.google.com/spreadsheets/d/1R77xvSEdEF5UMF6u1POlHVyYHbB1zFkNqEYTkwD7GPw/edit?usp=sharing) that makes their party look strong. Choose your party (e.g. DF) and create:
+
+1. An honest map: Follows cartographic best practices
+2. A misleading map: Technically correct but emphasizes your client's strength (through color, classification, or geographic focus)
+3. A 300-word memo: Explains how the misleading map manipulates perception without lying
+
+
+### Get data
+
+```{r}
+# get municipalities
+muns <- readRDS("../data/gadm36_DNK_2_sp.rds") %>% 
+  st_as_sf() 
+
+# get votes
+library(googlesheets4)
+gs4_deauth()
+votes <- read_sheet("https://docs.google.com/spreadsheets/d/1R77xvSEdEF5UMF6u1POlHVyYHbB1zFkNqEYTkwD7GPw/edit?")
+
+# align municipality names
+`%nin%` <- Negate(`%in%`)
+votes$Division %in% muns$NAME_2
+votes$Division[votes$Division %nin% muns$NAME_2]
+muns$NAME_2[31] <- "Aarhus"
+muns$NAME_2[21] <- "Høje-Taastrup"
+muns$NAME_2[25] <- "Copenhagen"
+muns$NAME_2[91] <- "Nordfyn"
+  
+# join up
+
+mun_vote <- muns %>% 
+  select(NAME_2) %>% 
+  left_join(votes, by = c("NAME_2"="Division"))
+mun_vote
+```
+
+### Look at the data
+Is everything in place, any municipalities missing?
+```{r}
+# check out the voting data
+library(mapview)
+mapview(mun_vote, zcol = "A")
+```
+
+
+###  Choose a map that is honest and one that lies
+```{r}
+a <- tm_shape(mun_vote) + tm_polygons(col = "Å", style = "pretty", n = 5) + tm_credits("Pretty")
+#a
+# "Jenks" style further smooths over the gaps
+b <- tm_shape(mun_vote) + tm_polygons(col = "Å", style = "jenks", n = 6) + tm_credits("Jenks")
+#b
+# quantile style divides into 5 even groups
+c <- tm_shape(mun_vote) + tm_polygons(col = "Å", style = "quantile", n=5) + tm_credits("Quantile")
+#c
+# Equal interval style divides the distribution into even groups
+d <- tm_shape(mun_vote) + tm_polygons(col = "Å", style = "equal", n = 5) + tm_credits("Equal")
+#d
+# Write maps above to objects and plot them side by side 
+# with tmap_arrange() for better comparison
+
+tmap_arrange( a,b,c,d)
+
+```
+Quantile for Å (Alternativet) would robably be the best for the lying map. I guess it's difficult to make a map that's not somewhat misrepresenting their impact here without having another party to compare with. I guess the pretty style is doing pretty well. 
+
+```{r}
+common_layout <- tm_layout(
+  legend.outside = TRUE,
+  legend.outside.position = "right",
+  legend.text.size = 0.6,
+  legend.title.size = 0.8,
+  inner.margins = c(0.02, 0.02, 0.02, 0.02),
+  outer.margins = c(0, 0, 0, 0),
+  frame = FALSE
+)
+
+definitely_lying <- tm_shape(mun_vote) +
+  tm_polygons(col = "Å", style = "quantile", n=10) +
+  tm_credits("N. Engedal, voting data") +
+  tm_title("Municipalities that are ready for an alternative (Å)") +
+  tm_scalebar() + tm_compass(position=c("RIGHT", "top"), style="arrow") + 
+  common_layout
+
+definitely_lying
+
+# Winning party map categorical
+library(dplyr)
+library(readr)   # parse_number
+library(stringr)
+library(sf)
+library(dplyr)
+
+party_cols <- c("A","B","C","F","I","M","O","V","Æ","Ø","Å")
+
+mat <- mun_vote_num %>%
+  st_drop_geometry() %>%                 # <-- THIS is the key
+  dplyr::select(dplyr::all_of(party_cols)) %>%
+  as.matrix()
+
+mun_vote2 <- mun_vote_num %>%
+  mutate(
+    winner_idx  = max.col(mat, ties.method = "first"),
+    winner      = factor(party_cols[winner_idx], levels = party_cols),
+    winner_share = apply(mat, 1, max, na.rm = TRUE)
+  ) %>%
+  select(-winner_idx)
+
+
+winner_palette <- c(
+  "A"="red", "B"="brown", "C"="green", "F"="yellow",
+  "I"="darkgreen", "M"="purple", "O"="orange", "V"="blue",
+  "Æ"="darkred", "Ø"="darkblue", "Å"="magenta"
+)
+
+true_map <- tm_shape(mun_vote2) +
+  tm_polygons(
+    fill = "winner",
+    fill.scale  = tm_scale_categorical(values = winner_palette),
+    fill.legend = tm_legend(title = "Winning party"),
+    col = "white", lwd = 0.7
+  ) + tm_scalebar() + tm_compass(position=c("RIGHT", "top"), style="arrow") + 
+  tm_title("Winning party by municipality (2025)") +
+  tm_credits("N. Engedal, voting data") +
+  common_layout
+
+true_map
+
+both <- tmap_arrange(true_map, definitely_lying, ncol = 2)
+tmap_save(both, "output/true_vs_lying.png", width = 3200, height = 1200, units = "px", dpi = 300)
+```
+
+
+## Refs
+Tennekes, Martijn. 2019. Tmap: Thematic Maps. https://CRAN.R-project.org/package=tmap.
+
